@@ -24,7 +24,7 @@ const ACTION_SETS = {
     { label: 'Dashboard', icon: '�', agent: null, navigateTo: '/it' },
   ],
   admin: [
-    { label: 'System Logs', prompt: 'Show system activity logs', icon: '🗃️', agent: null },
+    { label: 'System Logs', icon: '🗃️', agent: null, navigateTo: '/admin/system-logs' },
     { label: 'Inventory', prompt: 'Show inventory', icon: '📦', agent: 'it' },
   ],
 };
