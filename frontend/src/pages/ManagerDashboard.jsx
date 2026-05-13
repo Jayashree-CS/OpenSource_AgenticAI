@@ -3,6 +3,7 @@ import { managerAPI } from '../api/manager';
 import useApi from '../hooks/useApi';
 import { useToast } from '../components/Toast';
 import { DataTable, ErrorState, Loading, PageHeader } from '../components/PageState';
+import { formatAssetStatus } from '../utils/assetStatus';
 
 export default function ManagerDashboard() {
   const { toast } = useToast();
@@ -95,7 +96,11 @@ export default function ManagerDashboard() {
               { key: 'id', label: 'ID' },
               { key: 'user_id', label: 'Employee' },
               { key: 'asset_type', label: 'Asset' },
-              { key: 'status', label: 'Status' },
+              {
+                key: 'status',
+                label: 'Status',
+                render: (row) => formatAssetStatus(row),
+              },
               { key: 'reason', label: 'Reason' },
               {
                 key: '_act',

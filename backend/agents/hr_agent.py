@@ -247,9 +247,44 @@ _LEAVE_TYPE_PATTERNS = {
 }
 
 _REASON_HINT_RE = re.compile(
-    r"\b(?:because of|because|due to|for|reason[:\s]+)\s+(.+?)(?:[\.\,]|$)",
+    r"\b(?:"
+    r"because of|because|due to|for|reason[:\s]+"
+    r"|as i (?:have|am|'m|feel|am feeling|'m feeling)"
+    r"|since i (?:have|am|'m|feel)"
+    r"|i (?:have|'m having|am having|'m suffering from|am suffering from)"
+    r"|having (?:a |an )?"
+    r"|suffering from"
+    r"|diagnosed with"
+    r")\s+(.+?)(?:[\.\,]|$)",
     re.IGNORECASE,
 )
+
+# Symptoms / situations that, when mentioned directly, are unambiguous
+# reasons even without a "because"/"due to" connector. Keeps the bot from
+# re-asking "reason?" when the user already said "I have fever".
+_DIRECT_REASON_TOKENS = (
+    "fever", "cold", "flu", "cough", "headache", "migraine", "stomach ache",
+    "stomach pain", "food poisoning", "viral", "infection", "covid",
+    "surgery", "hospital", "doctor", "medical", "dentist", "appointment",
+    "wedding", "marriage", "funeral", "bereavement", "emergency",
+    "family function", "personal work", "travel",
+)
+
+
+def _direct_reason(text: str) -> str | None:
+    """Return a direct symptom/event reason if the message mentions one
+    without any explicit ``because``/``due to`` connector.
+
+    Example: ``"apply sick leave as I have fever"`` returns ``"fever"``
+    even though ``as`` isn't in the legacy connector list.
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    for token in _DIRECT_REASON_TOKENS:
+        if re.search(rf"\b{re.escape(token)}\b", lowered):
+            return token
+    return None
 
 
 def _coerce_date(value):
@@ -335,9 +370,11 @@ def _merge_leave_slots(wf_data: dict, message: str, history, user) -> dict:
         if flex.get("end_date") and not merged.get("end_date"):
             merged["end_date"] = flex["end_date"]
 
-    # Reason
+    # Reason — try connector-based regex first, then direct symptom/event
+    # tokens (so "apply sick leave as I have fever" yields reason="fever"
+    # without needing a "because"/"due to" connector).
     if not merged.get("reason"):
-        r = _detect_reason(message)
+        r = _detect_reason(message) or _direct_reason(message)
         if r:
             merged["reason"] = r
 
@@ -365,8 +402,15 @@ def _merge_leave_slots(wf_data: dict, message: str, history, user) -> dict:
             )
         )
         msg_has_reason_marker = bool(
-            re.search(r"\b(because|due to|reason|for the reason)\b", msg_lower)
-        )
+            re.search(
+                r"\b(because|due to|reason|for the reason"
+                r"|as i (have|am|'m|feel)"
+                r"|since i (have|am|'m|feel)"
+                r"|i have|i'm having|i am having"
+                r"|suffering from|diagnosed with|having a|having an)\b",
+                msg_lower,
+            )
+        ) or bool(_direct_reason(message))
         msg_has_leave_type = bool(_detect_leave_type(message))
 
         try:
@@ -407,6 +451,44 @@ def _missing_leave_slots(wf_data: dict) -> list[str]:
     return missing
 
 
+# ---------------------------------------------------------------------------
+# Fresh-start detection — lets the user reset a stale leave workflow
+# ---------------------------------------------------------------------------
+
+_APPLY_LEAVE_INITIATOR_RE = re.compile(
+    r"\b("
+    r"i\s+(?:want|need|would like|'?d like)\s+to\s+apply.*\bleave\b"
+    r"|please\s+apply.*\bleave\b"
+    r"|can\s+i\s+apply.*\bleave\b"
+    r"|apply\s+(?:for\s+)?(?:a\s+|the\s+)?leave"
+    r"|new\s+leave\s+(?:request|application)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_fresh_apply_leave(message: str) -> bool:
+    """True when the user is starting a brand-new leave application and
+    carries no concrete slot data in the same message.
+
+    Used to reset stale ``pending_workflow`` slots so the bot doesn't
+    silently reuse a previous turn's ``sick`` + ``fever`` when the user
+    just types ``"I want to apply leave"``.
+    """
+    if not message:
+        return False
+    if not _APPLY_LEAVE_INITIATOR_RE.search(message):
+        return False
+    if _detect_leave_type(message):
+        return False
+    if _detect_reason(message) or _direct_reason(message):
+        return False
+    flex = parse_flexible_dates(message)
+    if flex.get("start_date") or flex.get("end_date"):
+        return False
+    return True
+
+
 _SLOT_LABEL = {
     "leave_type": "leave type (sick / casual / earned)",
     "start_date": "start date",
@@ -445,6 +527,17 @@ def hr_agent(message, db, user, history=None, session_state: AgentSessionState =
 
     # 1. Handle Pending Multi-turn Workflow (resilient to mock state objects)
     pending = _session_get_pending(session_state)
+
+    # 1.0 Fresh-start guard — if the user is initiating a brand-new leave
+    # application ("I want to apply leave") while a stale ``leave_application``
+    # workflow still holds slots from a previous turn (e.g. sick + fever),
+    # reset that pending state so we re-collect all fields from scratch.
+    # Without this, the bot silently reuses the old slots and only asks for
+    # whatever single slot was missing last time.
+    if pending and pending.get("type") == "leave_application" \
+            and _is_fresh_apply_leave(message):
+        _session_clear_pending(session_state)
+        pending = None
 
     # 1a. Cancellation always wins, even mid-workflow.
     if pending and re.search(r"\b(no|cancel|stop|nevermind|abort)\b", msg_lower) \
@@ -547,8 +640,17 @@ def hr_agent(message, db, user, history=None, session_state: AgentSessionState =
 
     # 3. Leave Application Detection (kicks off a multi-turn workflow)
     if "apply" in msg_lower and "leave" in msg_lower or re.search(r"\b(want to|need to|would like to)\b.*\bleave\b", msg_lower):
-        action_data = extract_hr_action(message, history, user)
-        wf_data = _merge_leave_slots(action_data or {}, message, history, user)
+        # Start with an EMPTY slot bag and let _merge_leave_slots fill it
+        # using only evidence actually present in this turn's message.
+        # The previous version seeded ``wf_data`` directly from
+        # ``extract_hr_action(message, history, user)``, which let the LLM
+        # extractor hallucinate ``leave_type=sick, reason=fever,
+        # start_date=today`` by reading them out of stale conversation
+        # history. _merge_leave_slots' internal LLM fallback already
+        # applies msg_has_date_token / msg_has_reason_marker /
+        # msg_has_leave_type evidence checks, so going through it gives
+        # us the same coverage without the hallucinated defaults.
+        wf_data = _merge_leave_slots({}, message, history, user)
         still_missing = _missing_leave_slots(wf_data)
 
         _session_set_pending(session_state, "leave_application", wf_data)

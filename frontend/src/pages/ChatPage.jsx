@@ -254,8 +254,9 @@ export default function ChatPage() {
           <>
             <div className="chat-messages" role="log" aria-live="polite">
               {/* Approvals widget — manager sees leaves + manager-stage assets;
-                  IT team sees pending IT tickets + IT-stage assets */}
-              {(user?.role === 'manager' || user?.role === 'it_team') && messages.length <= 1 && (
+                  IT team sees pending IT tickets + IT-stage assets;
+                  admin (superior to both) sees the union of all queues. */}
+              {(user?.role === 'manager' || user?.role === 'it_team' || user?.role === 'admin') && messages.length <= 1 && (
                 <ApprovalWidget role={user.role} />
               )}
 

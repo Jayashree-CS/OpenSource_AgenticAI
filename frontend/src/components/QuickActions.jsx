@@ -5,7 +5,7 @@ import './QuickActions.css';
 // the role's primary dashboard route; the others fire a chat prompt.
 const ACTION_SETS = {
   employee: [
-    { label: 'Apply Leave', prompt: 'I want to apply for leave', icon: '📅', agent: 'hr' },
+    { label: 'Apply Leave', prompt: 'I want to apply leave', icon: '📅', agent: 'hr' },
     { label: 'Raise IT Ticket', prompt: 'I need to raise an IT support ticket', icon: '🎫', agent: 'it' },
   ],
   manager: [

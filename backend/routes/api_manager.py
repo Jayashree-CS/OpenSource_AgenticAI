@@ -121,13 +121,27 @@ def manager_team_overview(
     db: Session = Depends(get_db),
     user: Employee = Depends(get_current_user),
 ):
-    team = db.query(Employee).filter(Employee.manager_id == user.id).all()
-    team_emails = [e.email for e in team]
-    team_ids = [e.id for e in team]
+    """Approval history for the current reviewer.
 
-    leaves = db.query(LeaveRequest).filter(LeaveRequest.employee_id.in_(team_ids)).all() if team_ids else []
-    tickets = db.query(Ticket).filter(Ticket.user_id.in_(team_emails)).all() if team_emails else []
-    assets = db.query(AssetRequest).filter(AssetRequest.user_id.in_(team_emails)).all() if team_emails else []
+    - Manager: strictly their direct reports (Employee.manager_id == user.id).
+    - Admin: superior to every manager + IT lead, so returns the whole
+      company's leaves / tickets / assets so the admin "Approvals" page
+      is never blank.
+    """
+    is_admin = (user.role or "").lower() == "admin"
+
+    if is_admin:
+        team = db.query(Employee).order_by(Employee.id).all()
+        leaves = db.query(LeaveRequest).order_by(LeaveRequest.id.desc()).all()
+        tickets = db.query(Ticket).order_by(Ticket.id.desc()).all()
+        assets = db.query(AssetRequest).order_by(AssetRequest.id.desc()).all()
+    else:
+        team = db.query(Employee).filter(Employee.manager_id == user.id).all()
+        team_emails = [e.email for e in team]
+        team_ids = [e.id for e in team]
+        leaves = db.query(LeaveRequest).filter(LeaveRequest.employee_id.in_(team_ids)).all() if team_ids else []
+        tickets = db.query(Ticket).filter(Ticket.user_id.in_(team_emails)).all() if team_emails else []
+        assets = db.query(AssetRequest).filter(AssetRequest.user_id.in_(team_emails)).all() if team_emails else []
 
     return {
         "success": True,

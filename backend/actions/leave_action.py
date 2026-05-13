@@ -325,11 +325,20 @@ def get_leave_status(db, employee_id, leave_id):
     return leave
 
 def get_pending_leaves_for_manager(db, manager_id):
+    """Pending leaves awaiting manager action.
+
+    Managers see only their direct reports. Admin is superior to every
+    manager, so admins see every pending leave in the system — mirrors
+    the admin branch in ``get_pending_asset_requests_for_manager``.
+    """
     manager = db.query(Employee).filter(Employee.id == manager_id).first()
     query = db.query(LeaveRequest).join(
         Employee,
         LeaveRequest.employee_id == Employee.id
     ).filter(LeaveRequest.status == STATUS_PENDING_MANAGER)
+
+    if manager and (manager.role or "").lower() == "admin":
+        return query.all()
 
     return query.filter(Employee.manager_id == manager_id).all()
 

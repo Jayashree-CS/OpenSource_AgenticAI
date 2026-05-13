@@ -2,11 +2,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { managerAPI } from '../api/manager';
 import { itAPI } from '../api/it';
 import { useToast } from './Toast';
+import { formatAssetStatus } from '../utils/assetStatus';
 import './Approvalwidget.css';
 
 export default function ApprovalWidget({ role = 'manager' }) {
   const { toast } = useToast();
   const isIT = role === 'it_team';
+  // Admin is superior to manager + IT, so they see both queues at once.
+  const isAdmin = role === 'admin';
   const [leaves, setLeaves] = useState([]);
   const [assets, setAssets] = useState([]);
   const [tickets, setTickets] = useState([]);
@@ -18,7 +21,25 @@ export default function ApprovalWidget({ role = 'manager' }) {
     setLoading(true);
     setError('');
     try {
-      if (isIT) {
+      if (isAdmin) {
+        // Whole-company view: pending leaves + every asset still in
+        // flight (manager-stage OR IT-stage) + every open IT ticket.
+        const [l, mgrAssets, itAssets, t] = await Promise.all([
+          managerAPI.pendingLeaves(),
+          managerAPI.pendingAssets(),
+          itAPI.pendingAssets(),
+          itAPI.openTickets(),
+        ]);
+        setLeaves(Array.isArray(l) ? l : []);
+        // Dedupe by id — manager-stage and IT-stage rows are normally
+        // disjoint, but be defensive in case of overlap.
+        const merged = new Map();
+        for (const row of [...(mgrAssets || []), ...(itAssets || [])]) {
+          if (row && row.id != null) merged.set(row.id, row);
+        }
+        setAssets(Array.from(merged.values()));
+        setTickets(Array.isArray(t) ? t : []);
+      } else if (isIT) {
         const [t, a] = await Promise.all([
           itAPI.openTickets(),
           itAPI.pendingAssets(),
@@ -40,7 +61,7 @@ export default function ApprovalWidget({ role = 'manager' }) {
     } finally {
       setLoading(false);
     }
-  }, [isIT]);
+  }, [isIT, isAdmin]);
 
   useEffect(() => {
     load();
@@ -59,10 +80,20 @@ export default function ApprovalWidget({ role = 'manager' }) {
     }
   };
 
-  const handleAsset = async (id, action) => {
+  const handleAsset = async (id, action, row) => {
     setBusy((b) => ({ ...b, [`a-${id}`]: true }));
     try {
-      if (isIT) {
+      // For admin: pick the right endpoint based on the row's current
+      // workflow stage. Manager-stage rows still need a manager-route
+      // decision; IT-stage rows must go through the IT route. For pure
+      // IT users the IT route is always correct; for pure managers the
+      // manager route is always correct.
+      const isItStage =
+        row &&
+        String(row.manager_status || '').toLowerCase() === 'approved' &&
+        String(row.it_status || '').toLowerCase() === 'pending';
+      const useItRoute = isIT || (isAdmin && isItStage);
+      if (useItRoute) {
         await itAPI.actionAsset(id, action);
       } else {
         await managerAPI.actionAsset(id, action);
@@ -202,21 +233,21 @@ export default function ApprovalWidget({ role = 'manager' }) {
                 <div className="approval-item-info">
                   <span className="approval-item-name">{req.user_id || '—'}</span>
                   <span className="approval-item-detail">
-                    {req.asset_type} · {req.status}
+                    {req.asset_type} · {formatAssetStatus(req)}
                   </span>
                 </div>
               </div>
               <div className="approval-item-actions">
                 <button
                   className="approval-btn approve"
-                  onClick={() => handleAsset(req.id, 'approve')}
+                  onClick={() => handleAsset(req.id, 'approve', req)}
                   disabled={busy[`a-${req.id}`]}
                 >
                   ✓
                 </button>
                 <button
                   className="approval-btn reject"
-                  onClick={() => handleAsset(req.id, 'reject')}
+                  onClick={() => handleAsset(req.id, 'reject', req)}
                   disabled={busy[`a-${req.id}`]}
                 >
                   ✗

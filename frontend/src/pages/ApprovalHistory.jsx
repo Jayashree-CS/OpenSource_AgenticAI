@@ -2,6 +2,7 @@ import React from 'react';
 import { managerAPI } from '../api/manager';
 import useApi from '../hooks/useApi';
 import { DataTable, ErrorState, Loading, PageHeader } from '../components/PageState';
+import { formatAssetStatus } from '../utils/assetStatus';
 
 export default function ApprovalHistory() {
   const overview = useApi(() => managerAPI.teamOverview(), []);
@@ -48,7 +49,11 @@ export default function ApprovalHistory() {
               { key: 'id', label: 'ID' },
               { key: 'user_id', label: 'Employee' },
               { key: 'asset_type', label: 'Asset' },
-              { key: 'status', label: 'Status' },
+              {
+                key: 'status',
+                label: 'Status',
+                render: (row) => formatAssetStatus(row),
+              },
             ]}
             rows={overview.data?.assets || []}
             emptyMessage="No asset requests"

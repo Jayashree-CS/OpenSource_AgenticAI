@@ -3,6 +3,7 @@ import { employeeAPI } from '../api/employee';
 import useApi from '../hooks/useApi';
 import { useToast } from '../components/Toast';
 import { DataTable, ErrorState, Loading, PageHeader } from '../components/PageState';
+import { formatAssetStatus } from '../utils/assetStatus';
 
 export default function MyAssets() {
   const { toast } = useToast();
@@ -76,7 +77,11 @@ export default function MyAssets() {
             columns={[
               { key: 'id', label: 'ID' },
               { key: 'asset_type', label: 'Asset' },
-              { key: 'status', label: 'Status' },
+              {
+                key: 'status',
+                label: 'Status',
+                render: (row) => formatAssetStatus(row),
+              },
               { key: 'reason', label: 'Reason' },
               { key: 'created_at', label: 'Created' },
             ]}

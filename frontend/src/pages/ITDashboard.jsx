@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { itAPI } from '../api/it';
 import useApi from '../hooks/useApi';
 import { DataTable, ErrorState, Loading, PageHeader } from '../components/PageState';
+import { formatAssetStatus } from '../utils/assetStatus';
 
 export default function ITDashboard() {
   const tickets = useApi(() => itAPI.listTickets(), []);
@@ -82,7 +83,11 @@ export default function ITDashboard() {
                 { key: 'id', label: 'ID' },
                 { key: 'user_id', label: 'Employee' },
                 { key: 'asset_type', label: 'Asset' },
-                { key: 'status', label: 'Status' },
+                {
+                  key: 'status',
+                  label: 'Status',
+                  render: (row) => formatAssetStatus(row),
+                },
               ]}
               rows={pendingAssets.slice(0, 10)}
               emptyMessage="No asset requests waiting on IT."
